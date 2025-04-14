@@ -25,6 +25,7 @@ const knownTokens = [
   { symbol: "WETH", address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", decimals: 18 }
 ];
 
+
 export default function App() {
   const [wallet, setWallet] = useState(null);
   const [signer, setSigner] = useState(null);
@@ -70,15 +71,12 @@ export default function App() {
 
   const handleDeploy = async () => {
     try {
-      const provider = new BrowserProvider(window.ethereum);
-      const nftContract = new Contract(tokenAddress, erc721Abi, provider);
-      const owner = await nftContract.ownerOf(tokenId);
-      if (owner.toLowerCase() !== wallet.toLowerCase()) {
-        setTbaStatus("❌ You do not own the NFT required to deploy this TBA.");
-        return;
-      }
-      const registry = new Contract(REGISTRY_ADDRESS, registryABI, signer);
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const signer = await provider.getSigner();
+      const registry = new ethers.Contract(REGISTRY_ADDRESS, registryABI, signer);
+
       const initData = "0x8129fc1c00000000000000000000000000000000000000000000000000000000";
+
       const tx = await registry.createAccount(
         IMPLEMENTATION_ADDRESS,
         CHAIN_ID,
@@ -87,16 +85,20 @@ export default function App() {
         salt,
         initData
       );
-      setTbaStatus("⏳ Deploying...");
+
+      setTbaStatus('⏳ Deploying...');
       await tx.wait();
+      setTbaStatus('✅ Deployed! Re-checking...');
+
+      // Auto-recheck deployment status
       handleCheck();
     } catch (err) {
       console.error("Deployment error:", err);
-      setTbaStatus("❌ Deployment failed.");
+      setTbaStatus('❌ Deployment failed');
     }
   };
-
-  const handleSendEth = async () => {
+  
+    const handleSendEth = async () => {
     try {
       const contract = new Contract(tbaAddress, tbaAbi, signer);
       const tx = await contract.executeCall(recipient, parseUnits(erc20Amount, 18), "0x");
@@ -142,27 +144,33 @@ export default function App() {
     }
   };
 
-  const fetchTbaContents = async () => {
+  const fetchTbaContents = async (tokenAddresses = []) => {
     try {
       const provider = new BrowserProvider(window.ethereum);
+  
+      // Fetch ETH balance for TBA
       const eth = await provider.getBalance(tbaAddress);
-      setTbaEthBalance(formatUnits(eth, 18));
-
-      const balances = await Promise.all(knownTokens.map(async (token) => {
-        const contract = new Contract(token.address, erc20Abi, provider);
-        const raw = await contract.balanceOf(tbaAddress);
+      setTbaEthBalance(formatUnits(eth, 18));  // Convert it to a readable format
+  
+      // Fetch balances for each ERC-20 token (whether USDC, WETH, or any custom address)
+      const balances = await Promise.all(tokenAddresses.map(async (tokenAddress) => {
+        const contract = new Contract(tokenAddress, erc20Abi, provider);
+        const raw = await contract.balanceOf(tbaAddress);  // Fetch token balance
+        const symbol = await contract.symbol();  // Get token symbol (e.g. USDC, DAI)
+        const decimals = await contract.decimals();  // Get token decimals
+  
         return {
-          symbol: token.symbol,
-          balance: formatUnits(raw, token.decimals)
+          symbol,
+          balance: formatUnits(raw, decimals)  // Format token balance
         };
       }));
-
-      setTbaTokenBalances(balances);
+  
+      setTbaTokenBalances(balances);  // Store all token balances in state
     } catch (err) {
       console.error("Fetch contents failed:", err);
     }
   };
-
+  
   const fetchNftsFromAlchemy = async () => {
     if (!tbaAddress) return;
     try {
@@ -290,13 +298,23 @@ export default function App() {
           <h2 className="text-lg font-semibold">🖼️ NFTs Owned by TBA</h2>
           <button onClick={fetchNftsFromAlchemy} className="bg-indigo-600 text-white px-4 py-2 rounded w-full">Load NFTs</button>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4 pt-2">
-            {tbaNfts.map((nft, i) => (
-              <div key={i} className="border rounded p-2 bg-white">
-                <img src={nft?.media?.[0]?.gateway || "https://via.placeholder.com/100"} alt={nft.title} className="w-full h-32 object-cover rounded" />
-                <p className="mt-1 text-sm font-semibold truncate">{nft.title}</p>
-                <p className="text-xs text-gray-500 truncate">{nft.contract.address.slice(0, 6)}...{nft.contract.address.slice(-4)}</p>
-              </div>
-            ))}
+          {tbaNfts.map((nft, i) => (
+  <div key={i} className="border rounded p-2 bg-white">
+    <img 
+  src={nft?.media?.[0]?.gateway || "https://www.fillmurray.com/100/100"} 
+  alt={nft?.title || nft?.name || "NFT Image"} 
+  className="w-full h-32 object-cover rounded" 
+/>
+    <p className="mt-1 text-sm font-semibold truncate">{nft?.title || nft?.name || "Untitled NFT"}</p>
+    <p className="text-xs text-gray-500 truncate">
+      Contract: {nft?.contract?.address || "N/A"}
+    </p>
+    <p className="text-xs text-gray-500 truncate">
+      Token ID: {nft?.id?.tokenId || nft?.tokenId || "N/A"}
+    </p>
+  </div>
+))}
+
           </div>
         </div>
       )}
