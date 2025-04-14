@@ -1,7 +1,7 @@
 /* global BigInt */
 // SPDX-License-Identifier: MIT
 import './App.css';
-import React, { useState, useEffect } from "react";
+import React, { useState,} from "react";
 import { ethers, BrowserProvider, Contract, Interface, formatUnits, parseUnits } from "ethers";
 
 const REGISTRY_ADDRESS = "0x02101dfB77FDE026414827Fdc604ddAF224F0921";
@@ -17,14 +17,11 @@ const registryABI = [
 
 const tbaAbi = ["function executeCall(address,uint256,bytes) returns (bytes)"];
 const erc20Abi = ["function transfer(address,uint256) returns (bool)", "function balanceOf(address) view returns (uint256)", "function decimals() view returns (uint8)"];
-const erc721Abi = ["function safeTransferFrom(address from, address to, uint256 tokenId) external"];
-const erc1155Abi = ["function safeTransferFrom(address from, address to, uint256 id, uint256 amount, bytes data) external"];
-
-const knownTokens = [
-  { symbol: "USDC", address: "0xA0b86991C6218b36c1d19D4a2e9Eb0cE3606eB48", decimals: 6 },
-  { symbol: "WETH", address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", decimals: 18 }
+const erc721Abi = [
+  "function safeTransferFrom(address from, address to, uint256 tokenId) external",
+  "function ownerOf(uint256 tokenId) view returns (address)"
 ];
-
+const erc1155Abi = ["function safeTransferFrom(address from, address to, uint256 id, uint256 amount, bytes data) external"];
 
 export default function App() {
   const [wallet, setWallet] = useState(null);
@@ -68,9 +65,25 @@ export default function App() {
     const code = await provider.getCode(addr);
     setTbaStatus(code === "0x" ? "⚠️ Not deployed" : "✅ Deployed");
   };
-
-  const handleDeploy = async () => {
+  const checkNftOwnership = async () => {
     try {
+      const provider = new BrowserProvider(window.ethereum);
+      const contract = new Contract(tokenAddress, erc721Abi, provider);
+      const owner = await contract.ownerOf(tokenId);
+      return owner.toLowerCase() === wallet.toLowerCase();
+    } catch (err) {
+      console.error("Ownership check failed:", err);
+      return false;
+    }
+  };
+  
+  const handleDeploy = async () => {
+    try {const ownsIt = await checkNftOwnership();
+if (!ownsIt) {
+  alert("❌ You do not own this NFT, so you cannot deploy its TBA.");
+  return;
+}
+
       const provider = new ethers.BrowserProvider(window.ethereum);
       const signer = await provider.getSigner();
       const registry = new ethers.Contract(REGISTRY_ADDRESS, registryABI, signer);
@@ -100,6 +113,12 @@ export default function App() {
   
     const handleSendEth = async () => {
     try {
+      const provider = new BrowserProvider(window.ethereum);
+    const code = await provider.getCode(tbaAddress);
+    if (code === "0x") {
+      alert("❌ TBA is not deployed yet. Please deploy it first.");
+      return;
+    }
       const contract = new Contract(tbaAddress, tbaAbi, signer);
       const tx = await contract.executeCall(recipient, parseUnits(erc20Amount, 18), "0x");
       await tx.wait();
@@ -112,6 +131,12 @@ export default function App() {
 
   const handleErc20Transfer = async () => {
     try {
+      const provider = new BrowserProvider(window.ethereum);
+    const code = await provider.getCode(tbaAddress);
+    if (code === "0x") {
+      alert("❌ TBA is not deployed yet. Please deploy it first.");
+      return;
+    }
       const contract = new Contract(tbaAddress, tbaAbi, signer);
       const iface = new Interface(erc20Abi);
       const data = iface.encodeFunctionData("transfer", [recipient, parseUnits(erc20Amount, erc20Decimals)]);
@@ -126,6 +151,12 @@ export default function App() {
 
   const handleNftTransfer = async () => {
     try {
+      const provider = new BrowserProvider(window.ethereum);
+    const code = await provider.getCode(tbaAddress);
+    if (code === "0x") {
+      alert("❌ TBA is not deployed yet. Please deploy it first.");
+      return;
+    }
       const contract = new Contract(tbaAddress, tbaAbi, signer);
       let iface, data;
       if (nftType === "erc721") {
@@ -184,29 +215,7 @@ export default function App() {
       console.error("Alchemy NFT fetch failed:", err);
     }
   };
-  const fetchImageUrl = async (nft) => {
-    // Check if there's a direct image URL available in media
-    if (nft?.media?.[0]?.gateway) {
-      return nft?.media?.[0]?.gateway;
-    }
-    
-    // If not, try fetching the metadata from tokenUri
-    if (nft?.raw?.tokenUri) {
-      try {
-        const res = await fetch(nft.raw.tokenUri);
-        const metadata = await res.json();
-        return metadata?.image || "https://via.placeholder.com/100";  // Fallback if image isn't found
-      } catch (err) {
-        console.error("Error fetching token metadata:", err);
-        return "https://via.placeholder.com/100";  // Fallback image
-      }
-    }
-    
-    // Default fallback if no image URL is found
-    return "https://via.placeholder.com/100";
-  };
   
-
   return (
     <div className="app-container p-6 space-y-6 font-mono">
       <h1 className="text-2xl font-bold">💼 TBA Manager</h1>
