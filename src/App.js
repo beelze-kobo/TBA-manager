@@ -7,7 +7,7 @@ import { ethers, BrowserProvider, Contract, Interface, formatUnits, parseUnits }
 const REGISTRY_ADDRESS = "0x02101dfB77FDE026414827Fdc604ddAF224F0921";
 const IMPLEMENTATION_ADDRESS = "0x2D25602551487C3f3354dD80D76D54383A243358";
 const CHAIN_ID = 1;
-const ALCHEMY_API_KEY = "0mINB6AB1MtLMkgq5gFP4d-768_wxyqe"; // Replace with your Alchemy API Key
+const ALCHEMY_API_KEY = "0mINB6AB1MtLMkgq5gFP4d-768_wxyqe";
 const ALCHEMY_BASE_URL = `https://eth-mainnet.g.alchemy.com/nft/v3/${ALCHEMY_API_KEY}`;
 
 const registryABI = [
@@ -16,15 +16,23 @@ const registryABI = [
 ];
 
 const tbaAbi = ["function executeCall(address,uint256,bytes) returns (bytes)"];
-const erc20Abi = ["function transfer(address,uint256) returns (bool)", "function balanceOf(address) view returns (uint256)", "function decimals() view returns (uint8)"];
-const erc721Abi = ["function safeTransferFrom(address from, address to, uint256 tokenId) external"];
-const erc1155Abi = ["function safeTransferFrom(address from, address to, uint256 id, uint256 amount, bytes data) external"];
+const erc20Abi = [
+  "function transfer(address,uint256) returns (bool)",
+  "function balanceOf(address) view returns (uint256)",
+  "function decimals() view returns (uint8)",
+  "function symbol() view returns (string)"
+];
+const erc721Abi = [
+  "function ownerOf(uint256 tokenId) view returns (address)"
+];
+const erc1155Abi = [
+  "function balanceOf(address account, uint256 id) view returns (uint256)"
+];
 
 const knownTokens = [
   { symbol: "USDC", address: "0xA0b86991C6218b36c1d19D4a2e9Eb0cE3606eB48", decimals: 6 },
   { symbol: "WETH", address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", decimals: 18 }
 ];
-
 
 export default function App() {
   const [wallet, setWallet] = useState(null);
@@ -69,12 +77,35 @@ export default function App() {
     setTbaStatus(code === "0x" ? "⚠️ Not deployed" : "✅ Deployed");
   };
 
+  const checkOwnership = async () => {
+    try {
+      const provider = new BrowserProvider(window.ethereum);
+      const contract = new Contract(tokenAddress, nftType === "erc1155" ? erc1155Abi : erc721Abi, provider);
+
+      if (nftType === "erc721") {
+        const owner = await contract.ownerOf(tokenId);
+        return owner.toLowerCase() === wallet.toLowerCase();
+      } else {
+        const balance = await contract.balanceOf(wallet, tokenId);
+        return BigInt(balance) > 0n;
+      }
+    } catch (err) {
+      console.error("Ownership check failed:", err);
+      return false;
+    }
+  };
+
   const handleDeploy = async () => {
     try {
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      const signer = await provider.getSigner();
-      const registry = new ethers.Contract(REGISTRY_ADDRESS, registryABI, signer);
+      const ownsIt = await checkOwnership();
+      if (!ownsIt) {
+        alert("❌ You do not own this NFT. TBA cannot be deployed.");
+        return;
+      }
 
+      const provider = new BrowserProvider(window.ethereum);
+      const signer = await provider.getSigner();
+      const registry = new Contract(REGISTRY_ADDRESS, registryABI, signer);
       const initData = "0x8129fc1c00000000000000000000000000000000000000000000000000000000";
 
       const tx = await registry.createAccount(
@@ -89,15 +120,13 @@ export default function App() {
       setTbaStatus('⏳ Deploying...');
       await tx.wait();
       setTbaStatus('✅ Deployed! Re-checking...');
-
-      // Auto-recheck deployment status
       handleCheck();
     } catch (err) {
       console.error("Deployment error:", err);
       setTbaStatus('❌ Deployment failed');
     }
   };
-  
+
     const handleSendEth = async () => {
     try {
       const contract = new Contract(tbaAddress, tbaAbi, signer);
