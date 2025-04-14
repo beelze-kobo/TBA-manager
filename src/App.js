@@ -1,12 +1,14 @@
 /* global BigInt */
 // SPDX-License-Identifier: MIT
 import './App.css';
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { ethers, BrowserProvider, Contract, Interface, formatUnits, parseUnits } from "ethers";
 
 const REGISTRY_ADDRESS = "0x02101dfB77FDE026414827Fdc604ddAF224F0921";
 const IMPLEMENTATION_ADDRESS = "0x2D25602551487C3f3354dD80D76D54383A243358";
 const CHAIN_ID = 1;
+const ALCHEMY_API_KEY = "0mINB6AB1MtLMkgq5gFP4d-768_wxyqe"; // Replace with your Alchemy API Key
+const ALCHEMY_BASE_URL = `https://eth-mainnet.g.alchemy.com/nft/v3/${ALCHEMY_API_KEY}`;
 
 const registryABI = [
   "function account(address,uint256,address,uint256,uint256) view returns (address)",
@@ -26,27 +28,24 @@ const knownTokens = [
 export default function App() {
   const [wallet, setWallet] = useState(null);
   const [signer, setSigner] = useState(null);
-
   const [tokenAddress, setTokenAddress] = useState("");
   const [tokenId, setTokenId] = useState("");
   const [salt, setSalt] = useState("0x01");
   const [tbaAddress, setTbaAddress] = useState("");
   const [tbaStatus, setTbaStatus] = useState("");
-
   const [erc20Contract, setErc20Contract] = useState("");
   const [recipient, setRecipient] = useState("");
   const [erc20Amount, setErc20Amount] = useState("");
   const [erc20Decimals, setErc20Decimals] = useState(18);
   const [erc20TransferStatus, setErc20TransferStatus] = useState("");
-
   const [tbaEthBalance, setTbaEthBalance] = useState(null);
   const [tbaTokenBalances, setTbaTokenBalances] = useState([]);
-
   const [nftType, setNftType] = useState("erc721");
   const [nftContract, setNftContract] = useState("");
   const [nftTokenId, setNftTokenId] = useState("");
   const [nftAmount, setNftAmount] = useState("1");
   const [nftTransferStatus, setNftTransferStatus] = useState("");
+  const [tbaNfts, setTbaNfts] = useState([]);
 
   const connectWallet = async () => {
     const provider = new BrowserProvider(window.ethereum);
@@ -78,23 +77,23 @@ export default function App() {
         setTbaStatus("❌ You do not own the NFT required to deploy this TBA.");
         return;
       }
-    const registry = new Contract(REGISTRY_ADDRESS, registryABI, signer);
-    const initData = "0x8129fc1c00000000000000000000000000000000000000000000000000000000";
-    const tx = await registry.createAccount(
-      IMPLEMENTATION_ADDRESS,
-      CHAIN_ID,
-      tokenAddress,
-      tokenId,
-      salt,
-      initData
-    );
-    setTbaStatus("⏳ Deploying...");
-    await tx.wait();
-    handleCheck();
-  } catch (err) {
-    console.error("Deployment error:", err);
-    setTbaStatus("❌ Deployment failed.");
-  }
+      const registry = new Contract(REGISTRY_ADDRESS, registryABI, signer);
+      const initData = "0x8129fc1c00000000000000000000000000000000000000000000000000000000";
+      const tx = await registry.createAccount(
+        IMPLEMENTATION_ADDRESS,
+        CHAIN_ID,
+        tokenAddress,
+        tokenId,
+        salt,
+        initData
+      );
+      setTbaStatus("⏳ Deploying...");
+      await tx.wait();
+      handleCheck();
+    } catch (err) {
+      console.error("Deployment error:", err);
+      setTbaStatus("❌ Deployment failed.");
+    }
   };
 
   const handleSendEth = async () => {
@@ -159,37 +158,50 @@ export default function App() {
       }));
 
       setTbaTokenBalances(balances);
-
-      // Optional NFT ownership check (simple ERC-721 scan for tokenId 0-10)
-      const nftCheckRange = 10;
-      const nftHoldings = [];
-
-      for (let i = 0; i <= nftCheckRange; i++) {
-        const contract = new Contract(tokenAddress, erc721Abi, provider);
-        try {
-          const owner = await contract.ownerOf(i);
-          if (owner.toLowerCase() === tbaAddress.toLowerCase()) {
-            nftHoldings.push(i);
-          }
-        } catch (e) {
-          // token ID doesn't exist or contract reverted
-        }
-      }
-
-      if (nftHoldings.length) {
-        setTbaTokenBalances((prev) => [
-          ...prev,
-          { symbol: `NFTs (${tokenAddress.slice(0, 6)}...)`, balance: nftHoldings.join(", ") }
-        ]);
-      }
     } catch (err) {
       console.error("Fetch contents failed:", err);
     }
   };
 
+  const fetchNftsFromAlchemy = async () => {
+    if (!tbaAddress) return;
+    try {
+      const url = `${ALCHEMY_BASE_URL}/getNFTsForOwner?owner=${tbaAddress}&withMetadata=true`;
+      const res = await fetch(url);
+      const json = await res.json();
+      if (json?.ownedNfts) {
+        setTbaNfts(json.ownedNfts);
+      }
+    } catch (err) {
+      console.error("Alchemy NFT fetch failed:", err);
+    }
+  };
+  const fetchImageUrl = async (nft) => {
+    // Check if there's a direct image URL available in media
+    if (nft?.media?.[0]?.gateway) {
+      return nft?.media?.[0]?.gateway;
+    }
+    
+    // If not, try fetching the metadata from tokenUri
+    if (nft?.raw?.tokenUri) {
+      try {
+        const res = await fetch(nft.raw.tokenUri);
+        const metadata = await res.json();
+        return metadata?.image || "https://via.placeholder.com/100";  // Fallback if image isn't found
+      } catch (err) {
+        console.error("Error fetching token metadata:", err);
+        return "https://via.placeholder.com/100";  // Fallback image
+      }
+    }
+    
+    // Default fallback if no image URL is found
+    return "https://via.placeholder.com/100";
+  };
+  
+
   return (
-<div className="app-container p-6 space-y-6 font-mono">
-<h1 className="text-2xl font-bold">💼 TBA Manager</h1>
+    <div className="app-container p-6 space-y-6 font-mono">
+      <h1 className="text-2xl font-bold">💼 TBA Manager</h1>
 
       {!wallet ? (
         <button onClick={connectWallet} className="bg-purple-600 text-white px-4 py-2 rounded">
@@ -224,9 +236,7 @@ export default function App() {
           <h2 className="text-lg font-semibold">🚀 Send ETH from TBA</h2>
           <input value={erc20Amount} onChange={(e) => setErc20Amount(e.target.value)} placeholder="ETH Amount" className="border p-2 w-full" />
           <input value={recipient} onChange={(e) => setRecipient(e.target.value)} placeholder="Recipient Address" className="border p-2 w-full" />
-          <button onClick={handleSendEth} className="bg-yellow-500 text-white px-4 py-2 rounded w-full">
-            Send ETH
-          </button>
+          <button onClick={handleSendEth} className="bg-yellow-500 text-white px-4 py-2 rounded w-full">Send ETH</button>
         </div>
       )}
 
@@ -264,7 +274,6 @@ export default function App() {
         <div className="pt-4 border-t space-y-2">
           <h2 className="text-lg font-semibold">📊 View TBA Balances</h2>
           <button onClick={fetchTbaContents} className="bg-gray-800 text-white px-4 py-2 rounded w-full">Check Balances</button>
-
           {tbaEthBalance !== null && (
             <div className="bg-white p-3 rounded border">
               <p>ETH: {tbaEthBalance}</p>
@@ -273,6 +282,22 @@ export default function App() {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {tbaAddress && (
+        <div className="pt-4 border-t space-y-2">
+          <h2 className="text-lg font-semibold">🖼️ NFTs Owned by TBA</h2>
+          <button onClick={fetchNftsFromAlchemy} className="bg-indigo-600 text-white px-4 py-2 rounded w-full">Load NFTs</button>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 pt-2">
+            {tbaNfts.map((nft, i) => (
+              <div key={i} className="border rounded p-2 bg-white">
+                <img src={nft?.media?.[0]?.gateway || "https://via.placeholder.com/100"} alt={nft.title} className="w-full h-32 object-cover rounded" />
+                <p className="mt-1 text-sm font-semibold truncate">{nft.title}</p>
+                <p className="text-xs text-gray-500 truncate">{nft.contract.address.slice(0, 6)}...{nft.contract.address.slice(-4)}</p>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
